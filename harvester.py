@@ -134,6 +134,8 @@ class Harvester:
             pbar.update(1)
 
         pbar.close()
+        if self.re_encounters > 0:
+            print(f"we re-encountered {self.re_encounters} announcement(s)")
         return dataframe, images_holder
 
     @staticmethod
