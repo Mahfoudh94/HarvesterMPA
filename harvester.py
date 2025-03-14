@@ -1,24 +1,38 @@
 import datetime
 import re
+import threading
 import unicodedata
 import uuid
-from typing import List, Tuple
+from typing import List, Tuple, Set
 
 import requests
 from bs4 import BeautifulSoup
 from pandas import DataFrame
 from requests import Session
+from tqdm import tqdm
 
 import config
+from logger import base_logger
 
 
 class Harvester:
+    _page_counter: int = 1
+    stop_event = threading.Event()
+
     def __init__(self):
         conf = config.Config()
         self.telephone = conf.get('DataSources.Beetenders.Telephone')
         self.password = conf.get('DataSources.Beetenders.Password')
         self.host = conf.get('DataSources.Beetenders.Host')
         self.session: Session = requests.session()
+        self.hash_list: Set[str] = set()
+        self.re_encounters: int = 0
+
+    @classmethod
+    def page_count_iter(cls):
+        base_logger.info(f"scrapping page {cls._page_counter}")
+        cls._page_counter += 1
+        return cls._page_counter - 1
 
     def login(self):
         self.session.post(
@@ -29,28 +43,63 @@ class Harvester:
             }
         )
 
-    def get_page(self, page_number: int = 1, filters: dict = {}):
+    def get_page(self, page_number: int = None, filters: dict = None):
+        if page_number is None:
+            page_number = self.page_count_iter()
+        if filters is None:
+            filters = dict()
+
         filters = [f'{k}={v}' for k, v in filters.items()]
         filters = '&'.join(filters)
         url = self.host + '/annonces' \
-              + ('?' if len(filters) > 0 and page_number != 1 else '') \
+              + ('?' if len(filters) > 0 or page_number != 1 else '') \
               + (f'page={page_number}' if page_number != 1 else '') \
               + filters
 
-        response = self.session.get(url, timeout=20)
-        return BeautifulSoup(response.text, 'html.parser')
+        response = None
+        n_try = 1
+        while response is None:
+            if self.stop_event.is_set():
+                return BeautifulSoup()
+            try:
+                response = self.session.get(url, timeout=20)
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                base_logger.warn(f"try: {n_try}, link: {url}\n" \
+                + f"{e.__class__.__name__}: {e}")
+                n_try += 1
 
-    def get_boxes(self, soup: BeautifulSoup):
-        boxes = soup.select('.boxes-list')
-        return boxes
+        return BeautifulSoup(response.text, 'html.parser')
 
     def harvest_links(self, boxes: List[BeautifulSoup]) -> Tuple[DataFrame, List[List[str]]]:
         dataframe = DataFrame(columns=config.dataframe_cols.keys())\
             .astype(config.dataframe_cols)
         images_holder = []
-        for index, box in enumerate(boxes):
+        index = 0
+        pbar = tqdm(total=len(boxes))
+
+        for box in boxes:
             link = self.host + f'/{box.find('a').get('href').strip()}'
-            response = self.session.get(link)
+            link_hash = uuid.uuid5(uuid.NAMESPACE_URL, link)
+            link_hash_string = str(link_hash)
+
+            response = None
+            n_try = 1
+            while response is None:
+                if self.stop_event.is_set():
+                    break
+                try:
+                    response = self.session.get(link, timeout=20)
+                except requests.exceptions.RequestException as e:
+                    base_logger.warn(
+                    f"link: {link}\n" \
+                    + f"{e.__class__.__name__}: {e}"
+                    )
+                n_try += 1
+
+            if self.stop_event.is_set():
+                break
+
             soup = BeautifulSoup(response.text, 'html.parser')
 
             announcement_types = self._get_types(box)
@@ -58,10 +107,20 @@ class Harvester:
             pub_date = self._get_pub_date(box)
             due_date = self._get_due_date(box)
 
-            page_data = self.harvest_page(soup)
+            if link_hash in self.hash_list:
+                self.re_encounters += 1
+                pbar.update(1)
+                continue
+
+            page_data = None
+            try:
+                page_data = self.harvest_page(soup)
+            except Exception as e:
+                base_logger.error(f"error scrapping page {link}:\n{e.__class__.__name__}: {e}")
+                continue
 
             dataframe.loc[index] = {
-                'id': str(uuid.uuid5(uuid.NAMESPACE_URL, link)),
+                'id': link_hash_string,
                 'wilaya': self._get_wilaya(box),
                 'announcement_types': announcement_types,
                 'business_lines': business_lines,
@@ -71,15 +130,19 @@ class Harvester:
                 **page_data[0],
             }
             images_holder.append(page_data[1])
+            index += 1
+            pbar.update(1)
 
+        pbar.close()
         return dataframe, images_holder
 
-    def harvest_page(self, soup: BeautifulSoup) -> (dict, List[str]):
-        _ = soup.select('.annonceur-left p')
+    @staticmethod
+    def harvest_page(soup: BeautifulSoup) -> (dict, List[str]):
+        item = soup.select('.annonceur-left p')
         try:
             contact = '/'.join([
-                _[0].text.strip() if '@' in _[0].text.strip() else '',
-                _[1].text.strip() if '0' in _[1].text.strip() else ''
+                item[0].text.strip() if '@' in item[0].text.strip() else '',
+                item[1].text.strip() if '0' in item[1].text.strip() else ''
             ]).lstrip('/').rstrip('/')
         except:
             contact = ''
@@ -105,6 +168,11 @@ class Harvester:
         }
 
         return data_dict, images
+
+    @staticmethod
+    def get_boxes(soup: BeautifulSoup):
+        boxes = soup.select('.boxes-list')
+        return boxes
 
     @staticmethod
     def _get_wilaya(box: BeautifulSoup) -> int | None:
