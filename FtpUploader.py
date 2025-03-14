@@ -1,8 +1,11 @@
 import ftplib
 import io
 import os.path
+import logger
+import logging
 from abc import ABC
 
+ftp_logger = logging.getLogger("FTP")
 
 class FtpUploadAbstract(ABC):
     def login(self, username, password):
@@ -24,23 +27,35 @@ class FtpUploadAbstract(ABC):
 
 
 class FtpUploader(FtpUploadAbstract):
-    def __init__(self, host):
-        self.client = ftplib.FTP(host)
-        self.client.voidcmd("NOOP")  # Initial NOOP to check the connection.
+    def __init__(self, host, username, password):
+        self.host = host
+        self.username = username
+        self.password = password
+        self.client = ftplib.FTP()
+        self.connect()
+
+    def connect(self):
+        self.client.connect(self.host)
+        response = self.client.login(self.username, self.password)
+        ftp_logger.info(f'Login returned: {response}')
 
     def keep_connection_alive(self):
         try:
-            self.client.voidcmd("NOOP")  # Keeps the connection alive.
-        except (ftplib.error_temp, ftplib.error_perm):
-            self.client.close()
-            self.client.connect()
-
-    def login(self, username, password):
-        self.client.login(username, password)
+            self.client.pwd()  # Keeps the connection alive.
+        except (ftplib.error_temp, ftplib.error_perm, ConnectionAbortedError):
+            self.connect()
 
     def upload_file_b(self, file, remote_path):
         self.keep_connection_alive()
-        self.client.storbinary(f"STOR {remote_path}", file)
+        try:
+            response_code = self.client.storbinary(f"STOR {remote_path}", file)
+            ftp_logger.info(f"Upload to {remote_path} got: {response_code}")
+        except (ftplib.error_temp, ftplib.error_perm) as e:
+            ftp_logger.error(f"Upload to {remote_path} got: {e}")
+            raise Exception
+        except Exception as e:
+            ftp_logger.error(f"Upload to {remote_path} got: {e.__class__.__name__}: {e}")
+            raise Exception
 
     def upload_binary(self, payload, remote_path):
         self.keep_connection_alive()
