@@ -2,7 +2,7 @@ import datetime
 import uuid
 from typing import List
 
-from sqlalchemy import Table, Column, ForeignKey, UUID as sa_UUID
+from sqlalchemy import Table, Column, ForeignKey, String as sa_String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import ModelBase
@@ -26,12 +26,12 @@ class Announcement(ModelBase):
     __tablename__ = 'announcements'
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    title: Mapped[str] = mapped_column(default="")
-    description: Mapped[str] = mapped_column(default="")
-    number: Mapped[str] = mapped_column(default=True)
-    owner: Mapped[str] = mapped_column(nullable=True)
-    terms: Mapped[str] = mapped_column(nullable=True)
-    contact: Mapped[str] = mapped_column(nullable=True)
+    title: Mapped[str] = mapped_column(sa_String(512), default="")
+    description: Mapped[str] = mapped_column(sa_String(2040), default="")
+    number: Mapped[str] = mapped_column(sa_String(64), default=True)
+    owner: Mapped[str] = mapped_column(sa_String(192), nullable=True)
+    terms: Mapped[str] = mapped_column(sa_String(512), nullable=True)
+    contact: Mapped[str] = mapped_column(sa_String(192), nullable=True)
     due_amount: Mapped[int] = mapped_column(default=-1)
     wilaya: Mapped[int] = mapped_column(nullable=True)
     publish_date: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.now())
@@ -54,7 +54,7 @@ class AnnouncementImage(ModelBase):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     announcement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('announcements.id'))
-    image_path: Mapped[str] = mapped_column(nullable=False)
+    image_path: Mapped[str] = mapped_column(sa_String(255), nullable=False)
 
     announcement: Mapped["Announcement"] = relationship(back_populates="images")
 
@@ -63,7 +63,7 @@ class AnnouncementType(ModelBase):
     __tablename__ = 'announcement_types'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(nullable=False)
+    name: Mapped[str] = mapped_column(sa_String(64), nullable=False)
 
     announcements: Mapped[List["Announcement"]] = relationship(
         secondary=announcements_types_association,
@@ -75,9 +75,18 @@ class BusinessLine(ModelBase):
     __tablename__ = 'business_lines'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(nullable=False)
+    name: Mapped[str] = mapped_column(sa_String(192), nullable=False)
 
     announcements: Mapped[List["Announcement"]] = relationship(
         secondary=announcements_business_lines_association,
         back_populates="business_lines"
     )
+
+class FailedImageUploads(ModelBase):
+    __tablename__ = 'failed_image_uploads'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    image_link: Mapped[str] = mapped_column(sa_String(255), nullable=False)
+    announcement_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('announcements.id'))
+
+    announcement: Mapped["Announcement"] = relationship()
