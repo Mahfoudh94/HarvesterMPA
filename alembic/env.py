@@ -6,11 +6,13 @@ from sqlalchemy import pool
 from alembic import context
 
 import database
+from config import Config
 from models import *
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+local_conf = Config()
 
 print(f"Debugging {database.ModelBase.metadata.tables.keys()}")
 
@@ -43,7 +45,12 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    # url = config.get_main_option("sqlalchemy.url")
+    host = local_conf.get("Database.Host")
+    username = local_conf.get("Database.Username")
+    password = local_conf.get("Database.Password")
+    database = local_conf.get("Database.Database")
+    url = f"mysql+pymysql://{username}:{password}@{host}/{database}"
     context.configure(
         url=url,
         target_metadata=target_metadata,
