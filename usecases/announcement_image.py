@@ -1,38 +1,40 @@
+import io
 import uuid
 from typing import List
 
-import cv2
-import numpy as np
+import PIL.Image
 import requests
 
 import config
 import watermark_remove
 from FtpUploader import FtpUploader
+from models import FailedImageUploads
+from usecases import usecase_logger, session
 
 conf = config.Config()
 HOST = conf.get('FTP.Host')
 USERNAME = conf.get('FTP.Username')
 PASSWORD = conf.get('FTP.Password')
 
-ftp_client = FtpUploader(HOST)
-ftp_client.login(USERNAME, PASSWORD)
+ftp_client = FtpUploader(HOST, USERNAME, PASSWORD)
 
 
 def upload(image_list: List[str], announcement_id: uuid.UUID) -> List[str]:
     uploaded_images: List[str] = []
-    for index, image in enumerate(image_list):
-        # Fetch the image from the URL
-        response = requests.get(image, stream=True)
-        response.raise_for_status()
-        image_data = np.frombuffer(response.content, np.uint8)
-        image_np = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+    for index, image_link in enumerate(image_list):
+        response = requests.get(image_link, stream=True)
+        image_bytes = io.BytesIO(response.content)
+        image = PIL.Image.open(image_bytes)
 
-        # Process the image with watermark remover
-        processed_image = watermark_remove.remove_beetender(image_np)
+        processed_image = watermark_remove.remove_beetenders_by_color(image)
 
-        # Upload the processed image
-        upload_path = f"images/{announcement_id.hex}_{index}.jpg"
-        ftp_client.upload_file_b(processed_image, upload_path)
-        uploaded_images.append(upload_path)
+        try:
+            upload_path = f"images/{announcement_id.hex}_{index}.jpg"
+            ftp_client.upload_file_b(processed_image, upload_path)
+            uploaded_images.append(upload_path)
+        except Exception:
+            failed_image = FailedImageUploads(image_link=image_link, announcement_id=announcement_id)
+            session.add(failed_image)
+            return []
 
     return uploaded_images
