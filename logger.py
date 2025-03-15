@@ -2,6 +2,12 @@ import logging
 from logging import handlers
 import os
 
+if not os.path.exists("logs"):
+    os.makedirs("logs")
+if not os.path.exists("logs/current.log"):
+    with open("logs/current.log", "w") as f:
+        pass
+
 daily_handler = handlers.TimedRotatingFileHandler("logs/current.log", when="MIDNIGHT", backupCount=7)
 logging.basicConfig(
     level=logging.INFO,
