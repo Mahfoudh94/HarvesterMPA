@@ -14,8 +14,6 @@ from models import *
 config = context.config
 local_conf = Config()
 
-print(f"Debugging {database.ModelBase.metadata.tables.keys()}")
-
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
@@ -26,6 +24,13 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 target_metadata = database.ModelBase.metadata
+
+host = local_conf.get("Database.Host")
+username = local_conf.get("Database.Username")
+password = local_conf.get("Database.Password")
+database = local_conf.get("Database.Database")
+url = f"mysql+pymysql://{username}:{password}@{host}/{database}"
+config.set_main_option("sqlalchemy.url", url)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -45,12 +50,9 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    # url = config.get_main_option("sqlalchemy.url")
-    host = local_conf.get("Database.Host")
-    username = local_conf.get("Database.Username")
-    password = local_conf.get("Database.Password")
-    database = local_conf.get("Database.Database")
-    url = f"mysql+pymysql://{username}:{password}@{host}/{database}"
+    url = config.get_main_option("sqlalchemy.url")
+    print(f"Connecting to {url}")
+    context.configure(url=url, target_metadata=target_metadata)
     context.configure(
         url=url,
         target_metadata=target_metadata,
